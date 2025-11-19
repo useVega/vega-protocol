@@ -1,0 +1,85 @@
+# Registry-Based Workflow
+# This workflow uses the AgentRegistry to discover agents dynamically
+
+name: registry-text-pipeline
+version: 1.0.0
+description: Text processing pipeline using agents from the registry
+chain: base
+maxBudget: 1.0
+budgetToken: USDC
+
+# Input parameters
+inputs:
+  message:
+    type: string
+    description: Input text message to process
+    required: true
+
+# Output schema
+outputs:
+  original:
+    type: string
+    description: Original echoed message
+    value: "{{echo_step.output.echo}}"
+  uppercase:
+    type: string
+    description: Uppercased text
+    value: "{{uppercase_step.output.transformed}}"
+  reversed:
+    type: string
+    description: Reversed text
+    value: "{{reverse_step.output.transformed}}"
+
+# Workflow execution nodes
+nodes:
+  - id: echo_step
+    ref: echo-agent  # Reference to agent in registry
+    name: Echo Message
+    description: Echo the input message with metadata
+    inputs:
+      text: "{{inputs.message}}"
+    retry:
+      maxAttempts: 2
+      backoffMs: 500
+
+  - id: uppercase_step
+    ref: text-transformer  # Reference to agent in registry
+    name: Convert to Uppercase
+    description: Transform text to uppercase
+    inputs:
+      text: "{{echo_step.output.echo}}"
+      operation: uppercase
+    retry:
+      maxAttempts: 2
+      backoffMs: 500
+
+  - id: reverse_step
+    ref: text-transformer  # Reference to agent in registry
+    name: Reverse Text
+    description: Reverse the uppercased text
+    inputs:
+      text: "{{uppercase_step.output.transformed}}"
+      operation: reverse
+    retry:
+      maxAttempts: 2
+      backoffMs: 500
+
+# Execution flow
+edges:
+  - from: echo_step
+    to: uppercase_step
+    condition: "{{echo_step.status}} === 'success'"
+
+  - from: uppercase_step
+    to: reverse_step
+    condition: "{{uppercase_step.status}} === 'success'"
+
+# Metadata
+metadata:
+  author: agentic-ecosystem
+  tags:
+    - registry
+    - text-processing
+    - pipeline
+  estimatedCost: 0.35  # 0.10 + 0.15 + 0.15 USDC
+  estimatedDuration: 300ms

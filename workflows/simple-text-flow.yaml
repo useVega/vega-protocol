@@ -1,0 +1,66 @@
+# Simple Text Processing Flow
+# 
+# This workflow demonstrates a simple two-agent pipeline:
+# 1. Echo Agent - Receives input and echoes it back
+# 2. Text Transformer - Transforms the echoed text to uppercase
+#
+# To run this workflow:
+# 1. Start both agents:
+#    bun run agents/simple-echo-agent.ts &
+#    bun run agents/text-transformer-agent.ts &
+# 2. Register agents and execute workflow using the ecosystem
+
+name: Simple Text Processing Flow
+description: A simple two-step workflow that echoes text and transforms it
+version: 1.0.0
+chain: base
+token: USDC
+maxBudget: "0.5"
+entryNode: echo_step
+tags:
+  - demo
+  - text-processing
+
+# Define workflow inputs
+inputs:
+  message: string  # The text message to process
+
+# Define workflow outputs
+outputs:
+  original: string      # Original message from echo
+  transformed: string   # Transformed message from transformer
+
+# Define workflow nodes (agents)
+nodes:
+  echo_step:
+    type: agent
+    agent: simple-echo-v1
+    name: Echo Input
+    inputs:
+      message: "{{input.message}}"
+    retry:
+      maxAttempts: 3
+      backoffMs: 1000
+
+  transform_step:
+    type: agent
+    agent: text-transformer-v1
+    name: Transform to Uppercase
+    inputs:
+      text: "{{echo_step.output}}"
+      operation: "uppercase"
+    retry:
+      maxAttempts: 3
+      backoffMs: 1000
+
+# Define execution flow (edges between nodes)
+edges:
+  # Transform runs after echo completes
+  - from: echo_step
+    to: transform_step
+
+# Metadata
+metadata:
+  author: Agentic Ecosystem
+  tags: [demo, text-processing, simple]
+  category: example

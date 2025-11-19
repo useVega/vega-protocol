@@ -1,0 +1,93 @@
+# Advanced Text Processing Flow
+#
+# This workflow demonstrates multiple transformation steps:
+# 1. Echo Agent - Receives and validates input
+# 2. Transform to Title Case - Formats text nicely
+# 3. Transform to Uppercase - Converts to uppercase
+# 4. Reverse Text - Reverses the final result
+
+name: Advanced Text Processing Flow
+description: Multi-step text processing with various transformations
+version: 1.0.0
+chain: base
+token: USDC
+maxBudget: "1.0"
+entryNode: validate_input
+tags:
+  - demo
+  - text-processing
+  - advanced
+
+# Define workflow nodes
+nodes:
+  validate_input:
+    type: agent
+    agent: simple-echo-v1
+    name: Validate Input
+    inputs:
+      message: "{{input.text}}"
+    retry:
+      maxAttempts: 2
+      backoffMs: 500
+
+  to_title_case:
+    type: agent
+    agent: text-transformer-v1
+    name: Title Case Transform
+    inputs:
+      text: "{{validate_input.output}}"
+      operation: "titlecase"
+    retry:
+      maxAttempts: 3
+      backoffMs: 1000
+
+  to_uppercase:
+    type: agent
+    agent: text-transformer-v1
+    name: Uppercase Transform
+    inputs:
+      text: "{{to_title_case.output}}"
+      operation: "uppercase"
+    retry:
+      maxAttempts: 3
+      backoffMs: 1000
+
+  reverse_text:
+    type: agent
+    agent: text-transformer-v1
+    name: Reverse Text
+    inputs:
+      text: "{{to_uppercase.output}}"
+      operation: "reverse"
+    retry:
+      maxAttempts: 3
+      backoffMs: 1000
+
+  word_count:
+    type: agent
+    agent: text-transformer-v1
+    name: Word Count
+    inputs:
+      text: "{{input.text}}"
+      operation: "wordcount"
+    retry:
+      maxAttempts: 2
+      backoffMs: 500
+
+# Define execution flow
+edges:
+  # Linear transformation pipeline
+  - from: validate_input
+    to: to_title_case
+  
+  - from: to_title_case
+    to: to_uppercase
+  
+  - from: to_uppercase
+    to: reverse_text
+
+# Metadata
+metadata:
+  author: Agentic Ecosystem
+  category: example
+  estimatedDuration: 5s
