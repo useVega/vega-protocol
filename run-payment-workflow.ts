@@ -190,20 +190,16 @@ async function main() {
   // Register agents
   await registerAgents();
 
-  // Configuration
+  // Configuration - Load from environment
   const config: PaymentWorkflowConfig = {
-    network: 'base-sepolia',
-    // For demo purposes, you'd provide a real private key:
-    // clientPrivateKey: process.env.PRIVATE_KEY,
-    merchantWallet: '0x0000000000000000000000000000000000000000', // Demo merchant
-    autoPayment: true,  // Auto-process for demo
+    network: (process.env.PAYMENT_NETWORK as 'base' | 'base-sepolia') || 'base-sepolia',
+    clientPrivateKey: process.env.PRIVATE_KEY,
+    merchantWallet: process.env.MERCHANT_WALLET || '0x0000000000000000000000000000000000000000',
+    autoPayment: process.env.AUTO_PAYMENT === 'true',
   };
 
-  // Note: Uncomment below to use real wallet
-  // if (!process.env.PRIVATE_KEY) {
-  //   logger.error('PRIVATE_KEY environment variable required');
-  //   process.exit(1);
-  // }
+  // Check if we have real wallet configured
+  const hasRealWallet = !!process.env.PRIVATE_KEY && !!process.env.MERCHANT_WALLET;
 
   const executor = new PaymentWorkflowExecutor(config);
 
@@ -217,16 +213,22 @@ async function main() {
   logger.info(`Total Cost: ${executor['formatUSDC'](estimatedCost)} USDC`);
   logger.info('='.repeat(70));
 
-  logger.info('\n⚠️  Payment Demo Mode');
-  logger.info('To enable real payments:');
-  logger.info('1. Set PRIVATE_KEY environment variable');
-  logger.info('2. Set merchantWallet in config');
-  logger.info('3. Ensure wallet has Base Sepolia ETH and USDC');
-  logger.info('   - ETH faucet: https://www.alchemy.com/faucets/base-sepolia');
-  logger.info('   - USDC faucet: https://faucet.circle.com/');
-
-  // Execute workflow (demo mode - no real payments)
-  logger.info('\n🚀 Starting Demo Workflow Execution (without real payments)');
+  if (!hasRealWallet) {
+    logger.info('\n⚠️  Payment Demo Mode');
+    logger.info('To enable real payments:');
+    logger.info('1. Set PRIVATE_KEY environment variable');
+    logger.info('2. Set MERCHANT_WALLET in .env');
+    logger.info('3. Ensure wallet has Base Sepolia ETH and USDC');
+    logger.info('   - ETH faucet: https://www.alchemy.com/faucets/base-sepolia');
+    logger.info('   - USDC faucet: https://faucet.circle.com/');
+    logger.info('\n🚀 Starting Demo Workflow Execution (without real payments)');
+  } else {
+    logger.info('\n✅ Real Wallet Configured!');
+    logger.info(`   Network: ${config.network}`);
+    logger.info(`   Merchant: ${config.merchantWallet}`);
+    logger.info('\n💳 Starting Workflow Execution with REAL PAYMENTS');
+    logger.info('⚠️  This will spend actual USDC tokens!');
+  }
   
   try {
     const result = await executor.executeWorkflow(
