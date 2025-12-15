@@ -62,7 +62,22 @@ class PaymentWorkflowExecutor extends RegistryWorkflowExecutor {
     logger.info('='.repeat(70));
 
     try {
-      // Execute workflow (will handle payments as needed)
+      // Parse workflow to get nodes
+      const { WorkflowParser } = await import('./src/workflow/workflow-parser');
+      const workflow = WorkflowParser.parseFile(workflowPath);
+      
+      // Process payments for each node BEFORE workflow execution
+      const executionOrder = this['topologicalSort'](workflow.nodes, workflow.edges);
+      
+      logger.info(`\n💳 Processing Payments for ${executionOrder.length} nodes...`);
+      
+      for (const node of executionOrder) {
+        await this.processNodePayment(node, workflow);
+      }
+      
+      logger.info(`\n✅ All payments processed! Now executing workflow...`);
+      
+      // Execute workflow
       const result = await this.executeWorkflow(workflowPath, inputs);
       
       // Display payment summary
@@ -76,9 +91,9 @@ class PaymentWorkflowExecutor extends RegistryWorkflowExecutor {
   }
 
   /**
-   * Override executeNode to add payment handling
+   * Process payment for a node before execution
    */
-  protected async executeNodeWithPayment(node: any, workflow: any): Promise<void> {
+  private async processNodePayment(node: any, workflow: any): Promise<void> {
     try {
       // Get agent from registry
       const agent = await registry.getAgent(node.ref);
@@ -99,21 +114,43 @@ class PaymentWorkflowExecutor extends RegistryWorkflowExecutor {
         logger.info('   ⏳ Waiting for payment confirmation...');
       }
 
-      // Process payment
+      // Process payment signature
       const paymentPayload = await this.paymentService.processPayment(paymentReq);
       
-      // Verify payment
+      // Verify payment signature
       const isValid = await this.paymentService.verifyPayment(paymentPayload, paymentReq);
       
       if (!isValid) {
         throw new Error('Payment verification failed');
       }
 
-      // Record payment
-      const receipt = this.paymentService.createPaymentReceipt(paymentPayload, paymentReq);
-      this.paymentReceipts.push(receipt);
-      
-      logger.info(`   ✅ Payment processed successfully`);
+      logger.info(`   ✅ Payment signature verified`);
+
+      // Execute actual on-chain payment
+      if (this.paymentService.getClientWallet()) {
+        logger.info(`   💸 Executing on-chain USDC transfer...`);
+        const transferResult = await this.paymentService.executePayment(paymentReq);
+        
+        if (!transferResult.success) {
+          logger.error(`   ❌ Payment transfer failed: ${transferResult.error}`);
+          throw new Error(`Payment transfer failed: ${transferResult.error}`);
+        }
+
+        logger.info(`   ✅ Payment executed successfully!`);
+        logger.info(`   📝 Transaction Hash: ${transferResult.txHash}`);
+        logger.info(`   🔗 View on BaseScan: https://sepolia.basescan.org/tx/${transferResult.txHash}`);
+
+        // Record payment with transaction hash
+        const receipt = this.paymentService.createPaymentReceipt(paymentPayload, paymentReq);
+        receipt.transactionHash = transferResult.txHash || 'unknown';
+        receipt.status = 'confirmed';
+        this.paymentReceipts.push(receipt);
+      } else {
+        // Demo mode - just record without actual transfer
+        const receipt = this.paymentService.createPaymentReceipt(paymentPayload, paymentReq);
+        this.paymentReceipts.push(receipt);
+        logger.info(`   ✅ Payment processed (demo mode)`);
+      }
 
       // Now execute the actual node (parent class method)
       // Note: In production, you'd call the actual agent here
@@ -145,6 +182,12 @@ class PaymentWorkflowExecutor extends RegistryWorkflowExecutor {
       logger.info(`   Amount: ${this.formatUSDC(receipt.amount)} USDC`);
       logger.info(`   Network: ${receipt.network}`);
       logger.info(`   Status: ${receipt.status}`);
+      
+      if (receipt.transactionHash && receipt.transactionHash !== 'pending') {
+        logger.info(`   📝 TX Hash: ${receipt.transactionHash}`);
+        logger.info(`   🔗 View: https://sepolia.basescan.org/tx/${receipt.transactionHash}`);
+      }
+      
       logger.info(`   Time: ${receipt.timestamp}`);
       
       totalPaid += BigInt(receipt.amount);

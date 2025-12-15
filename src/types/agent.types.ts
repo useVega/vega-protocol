@@ -26,6 +26,8 @@ export interface PricingModel {
   token: TokenSymbol;
   chain: ChainType;
   unit?: string; // e.g., 'per-1000-tokens', 'per-MB'
+  requiresPayment?: boolean; // Whether agent demands payment upfront
+  paymentNetwork?: string; // e.g., 'base', 'base-sepolia'
 }
 
 export interface AgentInputSchema {

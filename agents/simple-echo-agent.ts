@@ -1,8 +1,8 @@
 /**
- * Simple Echo Agent - A2A Protocol Example
+ * Simple Echo Agent - A2A Protocol Example with Payment Support
  * 
- * This is a minimal A2A-compliant agent that echoes back messages.
- * Perfect for testing the Agentic Ecosystem's A2A integration.
+ * This agent echoes back messages and can optionally require x402 payments.
+ * When payment is required, it throws an x402PaymentRequiredException.
  * 
  * Run: bun run agents/simple-echo-agent.ts
  * Test: curl http://localhost:3001/.well-known/agent-card.json
@@ -11,6 +11,11 @@
 import express from 'express';
 import type { Task, Message } from '@a2a-js/sdk';
 import { Logger } from '../src/utils/logger';
+import { x402PaymentRequiredException } from 'a2a-x402';
+import type { PaymentRequirements } from 'a2a-x402';
+import { loadAgentConfig } from '../src/payment/agent-config-loader';
+import { createX402Middleware } from '../src/payment/x402-middleware';
+import { registerAgents } from '../register-agents';
 
 const logger = new Logger('EchoAgent');
 
@@ -54,6 +59,7 @@ const capabilities: AgentCapability[] = [
 
 /**
  * Simple Echo Agent Implementation
+ * Payment handling is done by x402 middleware
  */
 class EchoAgentExecutor implements AgentExecutor {
   /**
@@ -115,6 +121,16 @@ class EchoAgentExecutor implements AgentExecutor {
   }
 
   /**
+   * Check if payment was provided in the message
+   */
+  private checkForPayment(message: Message): boolean {
+    // Check message metadata for payment proof
+    // In production, this would verify the payment signature
+    const metadata = (message as any).metadata;
+    return metadata && metadata.paymentProvided === true;
+  }
+
+  /**
    * Cancel a running task
    */
   async cancelTask(taskId: string): Promise<void> {
@@ -139,6 +155,35 @@ class EchoAgentExecutor implements AgentExecutor {
     }
     throw new Error('No message text found in input');
   }
+
+  async cancelTask(taskId: string): Promise<void> {
+    logger.info('[EchoAgent]', `Cancel task: ${taskId}`);
+    // Simple echo agent doesn't support async tasks
+  }
+}
+
+/**
+ * Initialize agent with config from registry
+ */
+async function initializeAgent() {
+  // Register agents first
+  await registerAgents();
+  
+  // Load agent config from registry
+  const config = await loadAgentConfig('echo-agent');
+  
+  // Create base executor
+  const baseExecutor = new EchoAgentExecutor();
+  
+  // Wrap with x402 middleware if payment required
+  const executor = config.requiresPayment
+    ? createX402Middleware(baseExecutor, config.agent, {
+        merchantWallet: process.env.MERCHANT_WALLET,
+        network: process.env.PAYMENT_NETWORK,
+      })
+    : baseExecutor;
+
+  return { executor, config };
 }
 
 /**
@@ -147,7 +192,6 @@ class EchoAgentExecutor implements AgentExecutor {
 const app = express();
 app.use(express.json());
 
-const executor = new EchoAgentExecutor();
 const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || 'localhost';
 
@@ -207,11 +251,28 @@ app.post('/execute', async (req, res) => {
 
     logger.info('[EchoAgent]', `POST /execute - MessageId: ${message.messageId}`);
 
-    // Execute agent
+    // Execute agent with middleware
+    const executor = app.locals.executor;
     const result = await executor.execute(message);
     
     res.json({ result });
   } catch (error) {
+    // Check if this is an x402 payment required exception
+    if (error instanceof x402PaymentRequiredException) {
+      logger.info('[EchoAgent]', `Payment required - returning 402 status`);
+      return res.status(402).json({
+        error: {
+          code: 402,
+          message: error.message,
+          data: {
+            x402Version: 1,
+            accepts: error.paymentRequirements,
+            errorCode: error.errorCode
+          }
+        }
+      });
+    }
+    
     logger.error('[EchoAgent]', `Execute failed: ${(error as Error).message}`);
     res.status(500).json({
       error: (error as Error).message
@@ -258,7 +319,8 @@ app.post('/', async (req, res) => {
 
       logger.info('[EchoAgent]', `Executing message/send - MessageId: ${message.messageId}`);
 
-      // Execute agent
+      // Execute agent with middleware
+      const executor = app.locals.executor;
       const result = await executor.execute(message);
       
       // Return JSON-RPC success response
@@ -279,6 +341,25 @@ app.post('/', async (req, res) => {
       id
     });
   } catch (error) {
+    // Check if this is an x402 payment required exception
+    if (error instanceof x402PaymentRequiredException) {
+      logger.info('[EchoAgent]', `Payment required - returning 402 status`);
+      return res.status(402).json({
+        jsonrpc: '2.0',
+        error: {
+          code: 402,
+          message: error.message,
+          data: {
+            x402Version: 1,
+            accepts: error.paymentRequirements,
+            errorCode: error.errorCode
+          }
+        },
+        id: req.body.id || null
+      });
+    }
+
+    // Generic error handling
     logger.error('[EchoAgent]', `JSON-RPC handler failed: ${(error as Error).message}`);
     return res.status(500).json({
       jsonrpc: '2.0',
@@ -300,6 +381,7 @@ app.post('/cancel/:taskId', async (req, res) => {
     const { taskId } = req.params;
     logger.info('[EchoAgent]', `POST /cancel/${taskId}`);
     
+    const executor = app.locals.executor;
     await executor.cancelTask(taskId);
     
     res.json({
@@ -316,19 +398,44 @@ app.post('/cancel/:taskId', async (req, res) => {
 });
 
 /**
- * Start server
+ * Start server with async initialization
  */
-app.listen(PORT, () => {
-  logger.info('[EchoAgent]', '='.repeat(60));
-  logger.info('[EchoAgent]', '🤖 Simple Echo Agent - A2A Protocol v0.3.0');
-  logger.info('[EchoAgent]', '='.repeat(60));
-  logger.info('[EchoAgent]', `✓ Server running on http://${HOST}:${PORT}`);
-  logger.info('[EchoAgent]', `✓ Agent Card: http://${HOST}:${PORT}/.well-known/agent-card.json`);
-  logger.info('[EchoAgent]', `✓ Health Check: http://${HOST}:${PORT}/health`);
-  logger.info('[EchoAgent]', `✓ Execute: POST http://${HOST}:${PORT}/execute`);
-  logger.info('[EchoAgent]', '='.repeat(60));
-  logger.info('[EchoAgent]', 'Ready to receive A2A messages! 🚀');
-});
+async function startServer() {
+  try {
+    // Initialize agent with config from registry
+    const { executor, config } = await initializeAgent();
+    
+    // Make executor available to routes
+    app.locals.executor = executor;
+    app.locals.config = config;
+    
+    logger.info('[EchoAgent]', '='.repeat(60));
+    logger.info('[EchoAgent]', '🤖 Simple Echo Agent - A2A Protocol v0.3.0');
+    logger.info('[EchoAgent]', '='.repeat(60));
+    
+    if (config.requiresPayment) {
+      logger.info('[EchoAgent]', '💳 Payment mode: ENABLED');
+      logger.info('[EchoAgent]', `   Price: ${config.agent.pricing.amount} ${config.agent.pricing.token}`);
+      logger.info('[EchoAgent]', `   Network: ${config.agent.pricing.paymentNetwork || 'base-sepolia'}`);
+    } else {
+      logger.info('[EchoAgent]', '🆓 Payment mode: FREE');
+    }
+    
+    app.listen(PORT, () => {
+      logger.info('[EchoAgent]', `✓ Server running on http://${HOST}:${PORT}`);
+      logger.info('[EchoAgent]', `✓ Agent Card: http://${HOST}:${PORT}/.well-known/agent-card.json`);
+      logger.info('[EchoAgent]', `✓ Health Check: http://${HOST}:${PORT}/health`);
+      logger.info('[EchoAgent]', `✓ Execute: POST http://${HOST}:${PORT}/execute`);
+      logger.info('[EchoAgent]', '='.repeat(60));
+      logger.info('[EchoAgent]', 'Ready to receive A2A messages! 🚀');
+    });
+  } catch (error) {
+    logger.error('[EchoAgent]', `Failed to start server: ${(error as Error).message}`);
+    process.exit(1);
+  }
+}
+
+startServer();
 
 /**
  * Graceful shutdown

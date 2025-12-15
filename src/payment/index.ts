@@ -12,3 +12,5 @@ export {
   Wallet
 } from './x402-payment.service';
 export type { PaymentConfig, PaymentReceipt } from './x402-payment.service';
+
+export { MerchantServerExecutor } from './merchant-server-executor';
