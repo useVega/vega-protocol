@@ -473,6 +473,310 @@ const result = await executor.executeWorkflow(
 9. **Production Deployment**: Base mainnet with real USDC payments
 10. **Payment Facilitator**: Integrate x402 facilitator for payment routing
 
+## 🤖 Registering Your Agent
+
+### Overview
+
+Agents must be registered in the AgentRegistry before they can be used in workflows. Registration defines your agent's metadata, pricing, capabilities, and payment requirements.
+
+### Quick Start - Register an Agent
+
+**Method 1: Using the Registration Script**
+
+1. Add your agent to `register-agents.ts`:
+
+```typescript
+const agents: Partial<AgentDefinition>[] = [
+  {
+    ref: 'my-agent',                    // Unique identifier
+    name: 'My Custom Agent',
+    version: '1.0.0',
+    description: 'What your agent does',
+    category: 'transformation',         // See categories below
+    endpointType: 'http',
+    endpointUrl: 'http://localhost:3003',
+    ownerWallet: '0xYourWalletAddress',
+    
+    // Pricing configuration
+    pricing: {
+      type: 'per-call',
+      amount: '100',                    // In atomic units (100 = 0.0001 USDC)
+      token: 'USDC',
+      chain: 'base',
+      requiresPayment: true,            // Enable x402 payments
+      paymentNetwork: 'base-sepolia',   // or 'base' for mainnet
+    },
+    
+    supportedChains: ['base'],
+    supportedTokens: ['USDC'],
+    status: 'published',
+    ownerId: 'your-developer-id',
+    
+    // Input schema (JSON Schema)
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Input text' },
+        option: { type: 'string', enum: ['option1', 'option2'] },
+      },
+      required: ['text'],
+    },
+    
+    // Output schema (JSON Schema)
+    outputSchema: {
+      type: 'object',
+      properties: {
+        result: { type: 'string' },
+        timestamp: { type: 'string' },
+      },
+    },
+    
+    tags: ['text', 'processing', 'custom'],
+  },
+];
+```
+
+2. Run registration:
+```bash
+bun run register-agents.ts
+```
+
+**Method 2: Programmatic Registration**
+
+```typescript
+import { AgentRegistry } from './src/registry/agent-registry.service';
+
+const registry = new AgentRegistry();
+
+// Create agent
+const agent = await registry.createAgent({
+  ref: 'my-agent',
+  name: 'My Custom Agent',
+  // ... other fields
+});
+
+// Publish agent (makes it available in workflows)
+await registry.publishAgent(agent.ref);
+```
+
+### Agent Definition Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `ref` | string | ✅ | Unique identifier (e.g., 'text-summarizer-v1') |
+| `name` | string | ✅ | Human-readable name |
+| `version` | string | ✅ | Semantic version (e.g., '1.0.0') |
+| `description` | string | ✅ | What the agent does |
+| `category` | AgentCategory | ✅ | Agent category (see below) |
+| `endpointType` | 'http' \| 'native' | ✅ | How to invoke the agent |
+| `endpointUrl` | string | ✅* | HTTP endpoint URL (*required for http type) |
+| `ownerWallet` | string | ✅ | Ethereum address for payments |
+| `ownerId` | string | ✅ | Developer/organization ID |
+| `pricing` | PricingModel | ✅ | Pricing configuration |
+| `inputSchema` | JSON Schema | ✅ | Input validation schema |
+| `outputSchema` | JSON Schema | ✅ | Output format schema |
+| `supportedChains` | ChainType[] | ✅ | Supported blockchains |
+| `supportedTokens` | TokenSymbol[] | ✅ | Accepted payment tokens |
+| `tags` | string[] | ✅ | Searchable tags |
+| `status` | AgentStatus | Auto | 'draft', 'published', 'deprecated', 'suspended' |
+| `agentIdOnChain` | string | ❌ | ERC-8004 on-chain identity |
+
+### Agent Categories
+
+Available categories for agent classification:
+
+- `data-collection` - Web scrapers, API fetchers, data miners
+- `analysis` - Sentiment analysis, data analytics, insights
+- `transformation` - Text processing, format conversion, data mapping
+- `summarization` - Content summarization, report generation
+- `notification` - Alerts, emails, webhooks
+- `storage` - Data persistence, file upload, archiving
+- `ml-inference` - AI/ML model inference, predictions
+- `validation` - Data validation, verification, compliance checks
+- `other` - General purpose or uncategorized agents
+
+### Pricing Configuration
+
+```typescript
+pricing: {
+  type: 'per-call' | 'per-unit' | 'subscription',
+  amount: string,              // Atomic units (e.g., '100' = 0.0001 USDC)
+  token: 'USDC' | 'USDT' | 'ETH' | 'SOL',
+  chain: 'base' | 'arbitrum' | 'ethereum' | 'solana',
+  unit?: string,               // For per-unit: 'per-1000-tokens', 'per-MB'
+  requiresPayment?: boolean,   // Enable x402 payment enforcement
+  paymentNetwork?: string,     // 'base' or 'base-sepolia'
+}
+```
+
+**USDC Atomic Units:**
+- 1 USDC = 1,000,000 atomic units
+- 0.001 USDC = 1,000 atomic units
+- 0.0001 USDC = 100 atomic units
+
+### Input/Output Schemas
+
+Use [JSON Schema](https://json-schema.org/) format:
+
+```typescript
+inputSchema: {
+  type: 'object',
+  properties: {
+    text: { 
+      type: 'string', 
+      description: 'Text to process',
+      minLength: 1,
+      maxLength: 10000,
+    },
+    language: { 
+      type: 'string', 
+      enum: ['en', 'es', 'fr'],
+      default: 'en',
+    },
+    options: {
+      type: 'object',
+      properties: {
+        verbose: { type: 'boolean' },
+        timeout: { type: 'number' },
+      },
+    },
+  },
+  required: ['text'],
+}
+```
+
+### Agent Lifecycle
+
+```
+1. Create (draft status)
+   ↓
+2. Test & Validate
+   ↓
+3. Publish (available in workflows)
+   ↓
+4. Update (version changes)
+   ↓
+5. Deprecate (mark old versions)
+   ↓
+6. Suspend (temporarily disable)
+```
+
+### Registry Operations
+
+```typescript
+// List all published agents
+const agents = await registry.listAgents({ status: 'published' });
+
+// Find agents by category
+const analyzers = await registry.listAgents({ category: 'analysis' });
+
+// Find agents by chain
+const baseAgents = await registry.listAgents({ chain: 'base' });
+
+// Search by tags
+const textAgents = await registry.listAgents({ tags: ['text', 'nlp'] });
+
+// Get specific agent
+const agent = await registry.getAgent('my-agent');
+
+// Update agent
+await registry.updateAgent('my-agent', {
+  version: '1.1.0',
+  description: 'Updated description',
+});
+
+// Publish agent
+await registry.publishAgent('my-agent');
+
+// Deprecate agent
+await registry.deprecateAgent('my-agent');
+```
+
+### Best Practices
+
+1. **Unique References**: Use descriptive refs like `sentiment-analyzer-v1` instead of `agent1`
+2. **Semantic Versioning**: Follow semver (major.minor.patch)
+3. **Clear Descriptions**: Help users understand what your agent does
+4. **Accurate Schemas**: Validate all inputs and document outputs
+5. **Reasonable Pricing**: Start low, adjust based on usage and costs
+6. **Proper Categories**: Choose the most appropriate category
+7. **Useful Tags**: Add searchable tags for discovery
+8. **Test Before Publishing**: Verify your agent works before publishing
+9. **Update Gracefully**: Create new versions, deprecate old ones
+10. **Document Changes**: Keep changelog in description or separate docs
+
+### Testing Your Registration
+
+```bash
+# 1. Register your agent
+bun run register-agents.ts
+
+# 2. Verify it's registered
+bun -e "
+import { registry } from './register-agents';
+const agent = await registry.getAgent('my-agent');
+console.log(agent);
+"
+
+# 3. Test in a workflow
+# Add your agent ref to a YAML workflow and execute
+```
+
+### Example: Full Agent Registration Flow
+
+```typescript
+// 1. Define agent in register-agents.ts
+{
+  ref: 'sentiment-analyzer',
+  name: 'Sentiment Analysis Agent',
+  version: '1.0.0',
+  description: 'Analyzes text sentiment using ML models',
+  category: 'analysis',
+  endpointType: 'http',
+  endpointUrl: 'http://localhost:3005',
+  ownerWallet: process.env.OWNER_WALLET,
+  pricing: {
+    type: 'per-call',
+    amount: '200',
+    token: 'USDC',
+    chain: 'base',
+    requiresPayment: true,
+    paymentNetwork: 'base-sepolia',
+  },
+  supportedChains: ['base'],
+  supportedTokens: ['USDC'],
+  status: 'published',
+  ownerId: 'my-company',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      text: { type: 'string', description: 'Text to analyze' },
+    },
+    required: ['text'],
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      sentiment: { type: 'string', enum: ['positive', 'negative', 'neutral'] },
+      score: { type: 'number', minimum: 0, maximum: 1 },
+      confidence: { type: 'number' },
+    },
+  },
+  tags: ['sentiment', 'nlp', 'ml', 'analysis'],
+}
+
+// 2. Register
+bun run register-agents.ts
+
+// 3. Use in workflow (YAML)
+nodes:
+  - id: analyze
+    ref: sentiment-analyzer
+    name: Analyze Sentiment
+    inputs:
+      text: "{{inputs.review_text}}"
+```
+
 ## 📦 Example Agents
 
 ### Simple Echo Agent (Port 3001)
